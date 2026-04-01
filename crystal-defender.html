@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crystal Defender – Elemental Tower</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a1a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Segoe UI', sans-serif;
+    color: #e0e0ff;
+    user-select: none;
+  }
+  h1 {
+    font-size: 1.4rem;
+    letter-spacing: 2px;
+    color: #aaccff;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+  #ui {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .stat {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    color: #c8d8ff;
+  }
+  .stat span { font-weight: 700; color: #fff; }
+  #tower-select {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .tower-btn {
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    transition: all 0.15s;
+    background: rgba(255,255,255,0.08);
+    color: #e0e8ff;
+    letter-spacing: 0.5px;
+  }
+  .tower-btn:hover { filter: brightness(1.3); }
+  .tower-btn.active { border-color: #fff; background: rgba(255,255,255,0.18); }
+  #fire-btn   { border-color: #ff6633; color: #ffaa88; }
+  #ice-btn    { border-color: #44ccff; color: #aaeeff; }
+  #light-btn  { border-color: #ffee44; color: #ffee88; }
+  #fire-btn.active   { background: rgba(255,100,50,0.25); }
+  #ice-btn.active    { background: rgba(50,180,255,0.25); }
+  #light-btn.active  { background: rgba(255,230,50,0.25); }
+  #canvas {
+    border-radius: 10px;
+    border: 1px solid rgba(100,130,255,0.3);
+    cursor: crosshair;
+    display: block;
+  }
+  #info {
+    margin-top: 7px;
+    font-size: 0.75rem;
+    color: rgba(200,210,255,0.5);
+    text-align: center;
+  }
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,15,0.82);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 18px;
+    z-index: 10;
+  }
+  #overlay h2 { font-size: 2.5rem; color: #ff5555; letter-spacing: 3px; }
+  #overlay p  { font-size: 1.1rem; color: #aaccff; }
+  #overlay button {
+    padding: 12px 34px;
+    border-radius: 8px;
+    border: 2px solid #44aaff;
+    background: rgba(68,170,255,0.15);
+    color: #aaddff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: background 0.15s;
+  }
+  #overlay button:hover { background: rgba(68,170,255,0.32); }
+  #overlay.hidden { display: none; }
+  #wave-msg {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 3px;
+    text-shadow: 0 0 20px #88aaff;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s;
+    z-index: 5;
+  }
+</style>
+</head>
+<body>
+<h1>Crystal Defender – Elemental Tower</h1>
+
+<div id="ui">
+  <div class="stat">Wave: <span id="s-wave">1</span></div>
+  <div class="stat">Score: <span id="s-score">0</span></div>
+  <div class="stat">Crystal HP: <span id="s-hp">10</span> ❤</div>
+  <div class="stat">Towers: <span id="s-towers">0</span>/10</div>
+</div>
+
+<div id="tower-select">
+  <button class="tower-btn active" id="fire-btn"  onclick="selectTower('fire')">🔥 Fire</button>
+  <button class="tower-btn"        id="ice-btn"   onclick="selectTower('ice')">❄ Ice</button>
+  <button class="tower-btn"        id="light-btn" onclick="selectTower('lightning')">⚡ Lightning</button>
+</div>
+
+<canvas id="canvas" width="800" height="580"></canvas>
+
+<div id="info">Click canvas to place tower · Max 10 towers · Enemies spawn from the edges</div>
+
+<div id="overlay" class="hidden">
+  <h2>GAME OVER</h2>
+  <p id="final-score">Score: 0</p>
+  <button onclick="restartGame()">Play Again</button>
+</div>
+
+<div id="wave-msg" id="wave-msg"></div>
+
+<script>
+// ─── CANVAS SETUP ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const CX = W / 2, CY = H / 2; // Crystal center
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let towers = [], enemies = [], projectiles = [], particles = [];
+let score = 0, wave = 1, crystalHP = 10;
+let selectedType = 'fire';
+let gameOver = false;
+let waveInProgress = false;
+let enemiesLeft = 0;
+let spawnTimer = 0;
+let crystalPulse = 0;
+let frameCount = 0;
+
+// ─── TOWER DEFINITIONS ────────────────────────────────────────────────────────
+const TOWER_DEFS = {
+  fire:      { color: '#ff6633', range: 110, fireRate: 60,  damage: 2, projColor: '#ff8800', projSpeed: 4, radius: 14 },
+  ice:       { color: '#44ccff', range: 130, fireRate: 90,  damage: 1, projColor: '#aaeeff', projSpeed: 3, radius: 14, slow: 0.4 },
+  lightning: { color: '#ffee44', range:  90, fireRate: 30,  damage: 3, projColor: '#ffff88', projSpeed: 7, radius: 14 }
+};
+
+// ─── ENEMY DEFINITIONS ────────────────────────────────────────────────────────
+const ENEMY_TYPES = [
+  { name: 'goblin',  color: '#55dd55', shape: 'circle',   hp: 4,  speed: 1.2, radius: 10, reward: 5  },
+  { name: 'golem',   color: '#cc8844', shape: 'square',   hp: 12, speed: 0.6, radius: 14, reward: 12 },
+  { name: 'specter', color: '#cc44ff', shape: 'triangle', hp: 6,  speed: 1.8, radius: 10, reward: 8  },
+];
+
+// ─── UTILITY ──────────────────────────────────────────────────────────────────
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function spawnEdge() {
+  const side = Math.floor(Math.random() * 4);
+  if (side === 0) return { x: Math.random() * W, y: -20 };
+  if (side === 1) return { x: W + 20, y: Math.random() * H };
+  if (side === 2) return { x: Math.random() * W, y: H + 20 };
+  return { x: -20, y: Math.random() * H };
+}
+
+function spawnEnemy() {
+  const typeIdx = Math.min(Math.floor(Math.random() * Math.min(wave, ENEMY_TYPES.length)), ENEMY_TYPES.length - 1);
+  const def = ENEMY_TYPES[typeIdx];
+  const pos = spawnEdge();
+  const scaledHP = def.hp + (wave - 1) * 3;
+  enemies.push({
+    x: pos.x, y: pos.y,
+    hp: scaledHP, maxHP: scaledHP,
+    speed: def.speed + (wave - 1) * 0.08,
+    color: def.color,
+    shape: def.shape,
+    radius: def.radius,
+    reward: def.reward,
+    slow: 0,   // slowdown multiplier (0 = normal)
+    slowTimer: 0,
+    id: Math.random()
+  });
+}
+
+// ─── WAVE MANAGEMENT ──────────────────────────────────────────────────────────
+function startWave() {
+  waveInProgress = true;
+  enemiesLeft = 5 + wave * 3;
+  spawnTimer = 0;
+  showWaveMsg('Wave ' + wave);
+}
+
+function showWaveMsg(text) {
+  const el = document.getElementById('wave-msg');
+  el.textContent = text;
+  el.style.opacity = 1;
+  setTimeout(() => { el.style.opacity = 0; }, 1600);
+}
+
+// ─── TOWER SELECTION ──────────────────────────────────────────────────────────
+function selectTower(type) {
+  selectedType = type;
+  ['fire','ice','lightning'].forEach(t => {
+    document.getElementById(t[0] === 'l' ? 'light-btn' : t + '-btn')?.classList.remove('active');
+  });
+  document.getElementById('fire-btn').classList.remove('active');
+  document.getElementById('ice-btn').classList.remove('active');
+  document.getElementById('light-btn').classList.remove('active');
+  const map = { fire: 'fire-btn', ice: 'ice-btn', lightning: 'light-btn' };
+  document.getElementById(map[type]).classList.add('active');
+}
+
+// ─── PLACE TOWER ──────────────────────────────────────────────────────────────
+canvas.addEventListener('click', (e) => {
+  if (gameOver) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (W / rect.width);
+  const my = (e.clientY - rect.top)  * (H / rect.height);
+
+  // Prevent placing on crystal
+  if (Math.hypot(mx - CX, my - CY) < 40) return;
+  // Limit total towers
+  if (towers.length >= 10) return;
+  // Prevent overlapping towers
+  for (const t of towers) {
+    if (Math.hypot(mx - t.x, my - t.y) < 28) return;
+  }
+
+  const def = TOWER_DEFS[selectedType];
+  towers.push({
+    x: mx, y: my,
+    type: selectedType,
+    color: def.color,
+    range: def.range,
+    fireRate: def.fireRate,
+    damage: def.damage,
+    projColor: def.projColor,
+    projSpeed: def.projSpeed,
+    slow: def.slow || 0,
+    cooldown: 0,
+    radius: def.radius
+  });
+  document.getElementById('s-towers').textContent = towers.length;
+});
+
+// ─── SHOOT ────────────────────────────────────────────────────────────────────
+function towerShoot(tower) {
+  // Find nearest enemy in range
+  let target = null, minD = Infinity;
+  for (const e of enemies) {
+    const d = dist(tower, e);
+    if (d < tower.range && d < minD) { minD = d; target = e; }
+  }
+  if (!target) return;
+
+  const angle = Math.atan2(target.y - tower.y, target.x - tower.x);
+  projectiles.push({
+    x: tower.x, y: tower.y,
+    vx: Math.cos(angle) * tower.projSpeed,
+    vy: Math.sin(angle) * tower.projSpeed,
+    color: tower.projColor,
+    damage: tower.damage,
+    slow: tower.slow,
+    targetId: target.id,
+    radius: 4
+  });
+}
+
+// ─── PARTICLES ────────────────────────────────────────────────────────────────
+function spawnHitParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1 + Math.random() * 2.5;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      color,
+      life: 1,
+      decay: 0.04 + Math.random() * 0.04,
+      radius: 2 + Math.random() * 2
+    });
+  }
+}
+
+function spawnDeathParticles(x, y, color) {
+  spawnHitParticles(x, y, color, 14);
+}
+
+// ─── DRAWING HELPERS ──────────────────────────────────────────────────────────
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(80,90,160,0.12)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+}
+
+function drawBg() {
+  // Dark radial gradient background
+  const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, W * 0.7);
+  grad.addColorStop(0, '#0e0e2a');
+  grad.addColorStop(1, '#050510');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  drawGrid();
+}
+
+function drawCrystal() {
+  crystalPulse += 0.04;
+  const glow = 18 + Math.sin(crystalPulse) * 6;
+  // Outer glow
+  const g = ctx.createRadialGradient(CX, CY, 4, CX, CY, glow * 2);
+  g.addColorStop(0, 'rgba(100,180,255,0.55)');
+  g.addColorStop(1, 'rgba(100,180,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(CX, CY, glow * 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Crystal facets
+  const r = 18 + Math.sin(crystalPulse) * 2;
+  ctx.save();
+  ctx.translate(CX, CY);
+  // Bottom half
+  ctx.beginPath();
+  ctx.moveTo(0, r * 1.4);
+  ctx.lineTo(-r * 0.7, 0);
+  ctx.lineTo(r * 0.7, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#5599ff';
+  ctx.fill();
+  // Top half
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 1.4);
+  ctx.lineTo(-r * 0.7, 0);
+  ctx.lineTo(r * 0.7, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#88ccff';
+  ctx.fill();
+  // Shine
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 1.4);
+  ctx.lineTo(-r * 0.2, -r * 0.4);
+  ctx.lineTo(r * 0.1, -r * 0.5);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fill();
+  ctx.restore();
+
+  // HP label
+  ctx.fillStyle = '#aad8ff';
+  ctx.font = 'bold 11px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillText('♦ ' + crystalHP + ' HP', CX, CY + 30);
+}
+
+function drawTower(t) {
+  const def = TOWER_DEFS[t.type];
+  // Range indicator (subtle)
+  ctx.beginPath();
+  ctx.arc(t.x, t.y, t.range, 0, Math.PI * 2);
+  ctx.strokeStyle = t.color + '22';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Tower base circle
+  ctx.beginPath();
+  ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
+  ctx.fillStyle = '#111122';
+  ctx.fill();
+  ctx.strokeStyle = t.color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Inner symbol
+  ctx.fillStyle = t.color;
+  ctx.font = '13px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const icons = { fire: '🔥', ice: '❄', lightning: '⚡' };
+  ctx.font = '12px serif';
+  ctx.fillText(icons[t.type], t.x, t.y);
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawEnemy(e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+
+  if (e.shape === 'circle') {
+    ctx.beginPath();
+    ctx.arc(0, 0, e.radius, 0, Math.PI * 2);
+    ctx.fillStyle = e.color;
+    ctx.fill();
+    ctx.strokeStyle = '#fff3';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else if (e.shape === 'square') {
+    const r = e.radius;
+    ctx.fillStyle = e.color;
+    ctx.fillRect(-r, -r, r * 2, r * 2);
+    ctx.strokeStyle = '#fff3';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-r, -r, r * 2, r * 2);
+  } else if (e.shape === 'triangle') {
+    const r = e.radius;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r * 0.866, r * 0.5);
+    ctx.lineTo(-r * 0.866, r * 0.5);
+    ctx.closePath();
+    ctx.fillStyle = e.color;
+    ctx.fill();
+    ctx.strokeStyle = '#fff3';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // HP bar
+  const bw = e.radius * 2 + 2;
+  const bh = 3;
+  const bx = -bw / 2;
+  const by = -e.radius - 7;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = e.hp / e.maxHP > 0.5 ? '#44ff44' : e.hp / e.maxHP > 0.25 ? '#ffaa00' : '#ff4444';
+  ctx.fillRect(bx, by, bw * (e.hp / e.maxHP), bh);
+
+  ctx.restore();
+}
+
+function drawProjectile(p) {
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+  ctx.fillStyle = p.color;
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = p.color;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function drawParticle(p) {
+  ctx.globalAlpha = p.life;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+  ctx.fillStyle = p.color;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+// ─── UPDATE ───────────────────────────────────────────────────────────────────
+function update() {
+  frameCount++;
+
+  // Spawn enemies during wave
+  if (waveInProgress && enemiesLeft > 0) {
+    spawnTimer++;
+    const interval = Math.max(30, 80 - wave * 5);
+    if (spawnTimer >= interval) {
+      spawnEnemy();
+      enemiesLeft--;
+      spawnTimer = 0;
+    }
+  }
+
+  // Check wave end: no enemies left to spawn and all dead
+  if (waveInProgress && enemiesLeft === 0 && enemies.length === 0) {
+    waveInProgress = false;
+    wave++;
+    document.getElementById('s-wave').textContent = wave;
+    setTimeout(startWave, 2000);
+  }
+
+  // Move enemies toward crystal
+  for (const e of enemies) {
+    const angle = Math.atan2(CY - e.y, CX - e.x);
+    const spd = e.speed * (1 - e.slow);
+    e.x += Math.cos(angle) * spd;
+    e.y += Math.sin(angle) * spd;
+
+    // Slow timer
+    if (e.slowTimer > 0) {
+      e.slowTimer--;
+      if (e.slowTimer <= 0) e.slow = 0;
+    }
+
+    // Reached crystal?
+    if (dist(e, { x: CX, y: CY }) < 24) {
+      crystalHP--;
+      document.getElementById('s-hp').textContent = crystalHP;
+      spawnHitParticles(CX, CY, '#88aaff', 8);
+      // Remove enemy
+      e.hp = 0;
+    }
+  }
+
+  // Tower shoot
+  for (const t of towers) {
+    t.cooldown--;
+    if (t.cooldown <= 0) {
+      towerShoot(t);
+      t.cooldown = t.fireRate;
+    }
+  }
+
+  // Move projectiles
+  for (const p of projectiles) {
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Check collision with target enemy
+    for (const e of enemies) {
+      if (dist(p, e) < e.radius + p.radius) {
+        e.hp -= p.damage;
+        spawnHitParticles(p.x, p.y, p.color, 4);
+        // Apply slow
+        if (p.slow > 0) { e.slow = p.slow; e.slowTimer = 90; }
+        p.dead = true;
+        break;
+      }
+    }
+    // Off screen
+    if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) p.dead = true;
+  }
+
+  // Remove dead projectiles
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    if (projectiles[i].dead) projectiles.splice(i, 1);
+  }
+
+  // Remove dead enemies
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    if (enemies[i].hp <= 0) {
+      spawnDeathParticles(enemies[i].x, enemies[i].y, enemies[i].color);
+      score += enemies[i].reward;
+      document.getElementById('s-score').textContent = score;
+      enemies.splice(i, 1);
+    }
+  }
+
+  // Update particles
+  for (const p of particles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.92;
+    p.vy *= 0.92;
+    p.life -= p.decay;
+  }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    if (particles[i].life <= 0) particles.splice(i, 1);
+  }
+
+  // Check game over
+  if (crystalHP <= 0 && !gameOver) {
+    gameOver = true;
+    document.getElementById('final-score').textContent = 'Score: ' + score + '  |  Wave Reached: ' + wave;
+    document.getElementById('overlay').classList.remove('hidden');
+  }
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function render() {
+  drawBg();
+  drawCrystal();
+
+  // Draw tower range on hover (all shown faintly on render, highlighted on last placed)
+  towers.forEach(drawTower);
+  enemies.forEach(drawEnemy);
+  projectiles.forEach(drawProjectile);
+  particles.forEach(drawParticle);
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────────────────────────────
+function loop() {
+  if (!gameOver) update();
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ─── RESTART ──────────────────────────────────────────────────────────────────
+function restartGame() {
+  towers = []; enemies = []; projectiles = []; particles = [];
+  score = 0; wave = 1; crystalHP = 10;
+  gameOver = false; waveInProgress = false;
+  enemiesLeft = 0; spawnTimer = 0; frameCount = 0;
+  document.getElementById('s-wave').textContent = 1;
+  document.getElementById('s-score').textContent = 0;
+  document.getElementById('s-hp').textContent = 10;
+  document.getElementById('s-towers').textContent = 0;
+  document.getElementById('overlay').classList.add('hidden');
+  selectTower('fire');
+  startWave();
+}
+
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+startWave();
+loop();
+</script>
+</body>
+</html>
